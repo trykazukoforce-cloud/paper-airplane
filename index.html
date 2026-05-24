@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>かみヒコーキ ✈️</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif; }
+  #game { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  .hud {
+    position: fixed; top: 16px; left: 16px; color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,.4); pointer-events: none;
+    font-size: 15px; line-height: 1.6;
+  }
+  .hud b { font-size: 22px; }
+  .help {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.4); font-size: 14px;
+    background: rgba(0,0,0,.18); padding: 8px 16px; border-radius: 20px;
+    pointer-events: none; white-space: nowrap;
+  }
+  .best { position: fixed; top: 16px; right: 16px; color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,.4); font-size: 15px; text-align: right; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+  <div>とんだ距離</div>
+  <b id="dist">0</b> m
+  <div id="status" style="margin-top:8px;"></div>
+</div>
+<div class="best">ベスト<br><b id="best" style="font-size:20px;">0</b> m</div>
+<div class="help" id="help">下にドラッグして角度とパワーを決め、はなして発射 ✈️</div>
+
+<script>
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+let W, H;
+function resize() {
+  W = cv.width = window.innerWidth * devicePixelRatio;
+  H = cv.height = window.innerHeight * devicePixelRatio;
+  cv.style.width = window.innerWidth + 'px';
+  cv.style.height = window.innerHeight + 'px';
+}
+resize();
+window.addEventListener('resize', resize);
+
+const DPR = () => devicePixelRatio;
+const GROUND = () => H - 60 * DPR();
+
+// --- game state ---
+let plane, rings, clouds, wind;
+let state = 'aim';   // aim | drag | fly | landed
+let dragStart = null, dragNow = null;
+let best = +(localStorage.getItem('paperPlaneBest') || 0);
+document.getElementById('best').textContent = best;
+
+function reset() {
+  plane = { x: 90 * DPR(), y: GROUND() - 30 * DPR(), vx: 0, vy: 0, angle: -0.3, flying: false };
+  state = 'aim';
+  dragStart = dragNow = null;
+  wind = (Math.random() - 0.3) * 0.04 * DPR();
+  spawnWorld();
+  document.getElementById('status').textContent = '';
+  document.getElementById('dist').textContent = '0';
+  document.getElementById('help').style.opacity = 1;
+}
+
+function spawnWorld() {
+  clouds = [];
+  for (let i = 0; i < 14; i++) {
+    clouds.push({
+      x: Math.random() * W * 6, y: Math.random() * H * 0.6 + 20 * DPR(),
+      r: (40 + Math.random() * 60) * DPR(), s: 0.2 + Math.random() * 0.4
+    });
+  }
+  rings = [];
+  for (let i = 0; i < 40; i++) {
+    rings.push({
+      x: (700 + i * 520 + Math.random() * 200) * DPR(),
+      y: (H * 0.25 + Math.random() * H * 0.4),
+      r: 34 * DPR(), hit: false
+    });
+  }
+}
+
+// camera follows plane horizontally
+let camX = 0;
+
+// --- input ---
+function pos(e) {
+  const r = cv.getBoundingClientRect();
+  const t = e.touches ? e.touches[0] : e;
+  return { x: (t.clientX - r.left) * DPR(), y: (t.clientY - r.top) * DPR() };
+}
+function down(e) {
+  if (state === 'landed') { reset(); return; }
+  if (state !== 'aim') return;
+  state = 'drag'; dragStart = pos(e); dragNow = dragStart;
+  document.getElementById('help').style.opacity = 0;
+}
+function move(e) { if (state === 'drag') dragNow = pos(e); }
+function up() {
+  if (state !== 'drag') return;
+  const dx = dragStart.x - dragNow.x;
+  const dy = dragStart.y - dragNow.y;
+  const power = Math.min(Math.hypot(dx, dy), 220 * DPR()) / (220 * DPR());
+  const launch = 38 * DPR() * power + 6 * DPR();
+  const ang = Math.atan2(dy, dx);
+  plane.vx = Math.cos(ang) * launch;
+  plane.vy = Math.sin(ang) * launch;
+  plane.flying = true;
+  state = 'fly';
+}
+cv.addEventListener('mousedown', down);
+cv.addEventListener('mousemove', move);
+window.addEventListener('mouseup', up);
+cv.addEventListener('touchstart', e => { e.preventDefault(); down(e); }, {passive:false});
+cv.addEventListener('touchmove', e => { e.preventDefault(); move(e); }, {passive:false});
+window.addEventListener('touchend', e => { e.preventDefault(); up(e); }, {passive:false});
+
+// --- physics & loop ---
+function update() {
+  if (state === 'fly') {
+    plane.vy += 0.16 * DPR();          // gravity
+    plane.vx += wind;                   // wind
+    plane.vx *= 0.998; plane.vy *= 0.999; // drag
+    plane.x += plane.vx;
+    plane.y += plane.vy;
+    plane.angle = Math.atan2(plane.vy, plane.vx);
+
+    // rings = updrafts: passing through gives lift + speed
+    for (const ring of rings) {
+      if (!ring.hit && Math.hypot(plane.x - ring.x, plane.y - ring.y) < ring.r) {
+        ring.hit = true;
+        plane.vy -= 6 * DPR();
+        plane.vx += 4 * DPR();
+      }
+    }
+
+    // landed
+    if (plane.y >= GROUND() - 6 * DPR()) {
+      plane.y = GROUND() - 6 * DPR();
+      state = 'landed';
+      const dist = Math.round((plane.x - 90 * DPR()) / DPR() / 10);
+      if (dist > best) {
+        best = dist;
+        localStorage.setItem('paperPlaneBest', best);
+        document.getElementById('best').textContent = best;
+        document.getElementById('status').textContent = '🎉 新記録！ クリックでもう一回';
+      } else {
+        document.getElementById('status').textContent = 'クリックでもう一回';
+      }
+    }
+  }
+
+  // camera
+  const targetCam = Math.max(0, plane.x - W * 0.28);
+  camX += (targetCam - camX) * 0.1;
+
+  // live distance
+  const d = Math.max(0, Math.round((plane.x - 90 * DPR()) / DPR() / 10));
+  document.getElementById('dist').textContent = d;
+}
+
+function drawPlane() {
+  ctx.save();
+  ctx.translate(plane.x - camX, plane.y);
+  ctx.rotate(plane.angle);
+  const s = DPR();
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = 'rgba(0,0,0,.25)';
+  ctx.lineWidth = 1.2 * s;
+  // body
+  ctx.beginPath();
+  ctx.moveTo(20*s, 0); ctx.lineTo(-16*s, -11*s);
+  ctx.lineTo(-8*s, 0); ctx.lineTo(-16*s, 11*s);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // center fold
+  ctx.fillStyle = 'rgba(0,0,0,.08)';
+  ctx.beginPath();
+  ctx.moveTo(20*s,0); ctx.lineTo(-8*s,0); ctx.lineTo(-16*s,11*s);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  // sky gradient
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#5b9bd5'); g.addColorStop(0.6, '#8ec5e8'); g.addColorStop(1, '#d7eefb');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // clouds (parallax)
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  for (const c of clouds) {
+    const cx = (c.x - camX * c.s) % (W * 6);
+    const x = cx < -c.r ? cx + W * 6 : cx;
+    puff(x, c.y, c.r);
+  }
+
+  // rings (updrafts)
+  for (const ring of rings) {
+    const x = ring.x - camX;
+    if (x < -80*DPR() || x > W + 80*DPR()) continue;
+    ctx.beginPath();
+    ctx.arc(x, ring.y, ring.r, 0, Math.PI*2);
+    ctx.lineWidth = 6 * DPR();
+    ctx.strokeStyle = ring.hit ? 'rgba(255,255,255,.3)' : 'rgba(255,214,90,.95)';
+    ctx.stroke();
+    if (!ring.hit) {
+      ctx.beginPath();
+      ctx.arc(x, ring.y, ring.r - 9*DPR(), 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,255,255,.5)';
+      ctx.lineWidth = 2 * DPR();
+      ctx.stroke();
+    }
+  }
+
+  // ground
+  ctx.fillStyle = '#7cc36a';
+  ctx.fillRect(0, GROUND(), W, H - GROUND());
+  ctx.fillStyle = 'rgba(0,0,0,.06)';
+  for (let i = 0; i < W/(60*DPR())+2; i++) {
+    const x = (i*60*DPR() - camX*0.6) % (W + 60*DPR());
+    ctx.fillRect(x < 0 ? x + W : x, GROUND(), 30*DPR(), 6*DPR());
+  }
+
+  // aim guide
+  if (state === 'drag') {
+    const dx = dragStart.x - dragNow.x, dy = dragStart.y - dragNow.y;
+    const power = Math.min(Math.hypot(dx, dy), 220*DPR()) / (220*DPR());
+    const ang = Math.atan2(dy, dx);
+    const px = plane.x - camX, py = plane.y;
+    ctx.strokeStyle = 'rgba(255,255,255,.8)';
+    ctx.lineWidth = 2.5 * DPR();
+    ctx.setLineDash([8*DPR(), 8*DPR()]);
+    ctx.beginPath();
+    let sx = px, sy = py, svx = Math.cos(ang)*power*38*DPR(), svy = Math.sin(ang)*power*38*DPR();
+    ctx.moveTo(sx, sy);
+    for (let i=0;i<24;i++){ svy+=0.16*DPR(); sx+=svx; sy+=svy; ctx.lineTo(sx,sy); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // power meter
+    ctx.fillStyle = 'rgba(0,0,0,.2)';
+    ctx.fillRect(px-40*DPR(), py+30*DPR(), 80*DPR(), 8*DPR());
+    ctx.fillStyle = `hsl(${120-power*120},80%,55%)`;
+    ctx.fillRect(px-40*DPR(), py+30*DPR(), 80*DPR()*power, 8*DPR());
+  }
+
+  drawPlane();
+
+  // wind indicator
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.font = `${14*DPR()}px sans-serif`;
+  ctx.textAlign = 'right';
+  const arrow = wind > 0.005 ? '→ 追い風' : wind < -0.005 ? '← 向かい風' : '・ 無風';
+  ctx.fillText('風: ' + arrow, W - 16*DPR(), H - 22*DPR());
+  ctx.textAlign = 'left';
+}
+
+function puff(x, y, r) {
+  ctx.beginPath();
+  ctx.arc(x, y, r*0.6, 0, Math.PI*2);
+  ctx.arc(x + r*0.5, y + r*0.1, r*0.5, 0, Math.PI*2);
+  ctx.arc(x - r*0.5, y + r*0.1, r*0.45, 0, Math.PI*2);
+  ctx.arc(x, y + r*0.2, r*0.55, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+reset();
+loop();
+</script>
+</body>
+</html>
