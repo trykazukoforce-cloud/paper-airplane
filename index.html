@@ -2,25 +2,53 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>かみヒコーキ ✈️</title>
+<meta name="description" content="紙飛行機をできるだけ遠くまで飛ばすミニゲーム">
+<meta name="theme-color" content="#5b9bd5">
+<link rel="manifest" href="manifest.json">
+<!-- iOS standalone app support -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="かみヒコーキ">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif; }
-  #game { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  html, body {
+    height: 100%; overflow: hidden;
+    font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif;
+    /* prevent mobile pull-to-refresh, text selection and tap highlight */
+    overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+  #game {
+    display: block; width: 100vw; height: 100vh; cursor: crosshair;
+    touch-action: none; /* disable browser gestures so drag-to-aim works */
+  }
   .hud {
-    position: fixed; top: 16px; left: 16px; color: #fff;
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top));
+    left: calc(16px + env(safe-area-inset-left));
+    color: #fff;
     text-shadow: 0 1px 3px rgba(0,0,0,.4); pointer-events: none;
     font-size: 15px; line-height: 1.6;
   }
   .hud b { font-size: 22px; }
   .help {
-    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    position: fixed;
+    bottom: calc(16px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
     color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.4); font-size: 14px;
     background: rgba(0,0,0,.18); padding: 8px 16px; border-radius: 20px;
-    pointer-events: none; white-space: nowrap;
+    pointer-events: none; max-width: calc(100vw - 32px); text-align: center;
   }
-  .best { position: fixed; top: 16px; right: 16px; color: #fff;
+  .best {
+    position: fixed;
+    top: calc(16px + env(safe-area-inset-top));
+    right: calc(16px + env(safe-area-inset-right));
+    color: #fff;
     text-shadow: 0 1px 3px rgba(0,0,0,.4); font-size: 15px; text-align: right; }
 </style>
 </head>
@@ -272,6 +300,13 @@ function puff(x, y, r) {
 function loop() { update(); draw(); requestAnimationFrame(loop); }
 reset();
 loop();
+
+// register service worker for offline / installable PWA (ignored on file://)
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>
